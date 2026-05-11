@@ -1,5 +1,5 @@
 <?php
-// patient/profile.php - Edit Patient Profile Settings
+// patient/profile.php - Edit Patient Profile Settings & Pregnancy Cycle
 require_once '../config/config.php';
 
 if (!isset($_SESSION['patient_id']) || $_SESSION['role'] !== 'patient') {
@@ -11,7 +11,7 @@ $patient_id = $_SESSION['patient_id'];
 $success_msg = '';
 $error_msg = '';
 
-// Handle Profile Update
+// Handle Personal Profile Update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     $phone = filter_input(INPUT_POST, 'phone', FILTER_SANITIZE_STRING);
     $dob = $_POST['date_of_birth'];
@@ -21,12 +21,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     try {
         $stmt = $pdo->prepare("UPDATE patients SET phone = ?, date_of_birth = ?, blood_type = ?, medical_history = ? WHERE patient_id = ?");
         if ($stmt->execute([$phone, $dob, $blood_type, $medical_history, $patient_id])) {
-            $success_msg = "Profile updated successfully.";
+            $success_msg = "Personal profile updated successfully.";
         } else {
             $error_msg = "Failed to update profile.";
         }
     } catch (PDOException $e) {
         $error_msg = "Database error occurred.";
+    }
+}
+
+// Handle New Pregnancy Journey Reset
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['start_new_pregnancy'])) {
+    $new_due_date = trim($_POST['expected_due_date']);
+
+    if (!empty($new_due_date)) {
+        try {
+            $stmt = $pdo->prepare("UPDATE patients SET expected_due_date = ? WHERE patient_id = ?");
+            if ($stmt->execute([$new_due_date, $patient_id])) {
+                $success_msg = "New pregnancy journey started! Your dashboard timeline has been successfully reset to focus on your current cycle.";
+            }
+        } catch (PDOException $e) {
+            $error_msg = "Failed to start new pregnancy journey.";
+        }
+    } else {
+        $error_msg = "Please provide a valid Expected Due Date.";
     }
 }
 
@@ -187,50 +205,83 @@ $patient = $stmt->fetch();
     <main class="main-content">
         <div class="d-flex align-items-center mb-4 gap-3">
             <button class="mobile-toggle" id="openSidebar"><i class="bi bi-list"></i></button>
-            <h3 class="mb-0 fw-bold">Profile Settings</h3>
+            <h3 class="mb-0 fw-bold">Account & Medical Profile</h3>
         </div>
 
         <?php if (!empty($success_msg)): ?><div class="alert alert-success border-0 shadow-sm"><i class="bi bi-check-circle-fill me-2"></i> <?php echo $success_msg; ?></div><?php endif; ?>
         <?php if (!empty($error_msg)): ?><div class="alert alert-danger border-0 shadow-sm"><i class="bi bi-exclamation-triangle-fill me-2"></i> <?php echo $error_msg; ?></div><?php endif; ?>
 
-        <div class="card border-0 shadow-sm rounded-4 p-4 max-w-lg">
-            <form action="profile.php" method="POST">
-                <h5 class="fw-bold mb-4">Personal & Medical Information</h5>
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label text-muted small fw-bold">First Name (Cannot be changed here)</label>
-                        <input type="text" class="form-control bg-light" value="<?php echo htmlspecialchars($patient['first_name']); ?>" readonly>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label text-muted small fw-bold">Last Name</label>
-                        <input type="text" class="form-control bg-light" value="<?php echo htmlspecialchars($patient['last_name']); ?>" readonly>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label text-muted small fw-bold">Phone Number</label>
-                        <input type="text" name="phone" class="form-control" value="<?php echo htmlspecialchars($patient['phone'] ?? ''); ?>">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label text-muted small fw-bold">Date of Birth</label>
-                        <input type="date" name="date_of_birth" class="form-control" value="<?php echo htmlspecialchars($patient['date_of_birth'] ?? ''); ?>">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label text-muted small fw-bold">Blood Type</label>
-                        <select name="blood_type" class="form-control">
-                            <option value="">Select...</option>
-                            <?php $types = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-                            foreach ($types as $type) {
-                                $selected = ($patient['blood_type'] == $type) ? 'selected' : '';
-                                echo "<option value=\"$type\" $selected>$type</option>";
-                            } ?>
-                        </select>
-                    </div>
-                    <div class="col-12 mt-3">
-                        <label class="form-label text-muted small fw-bold">Brief Medical History / Known Allergies</label>
-                        <textarea name="medical_history" class="form-control" rows="4"><?php echo htmlspecialchars($patient['medical_history'] ?? ''); ?></textarea>
-                    </div>
+        <div class="row g-4">
+            <!-- Personal Profile Card -->
+            <div class="col-xl-8">
+                <div class="card border-0 shadow-sm rounded-4 p-4 h-100">
+                    <form action="profile.php" method="POST">
+                        <h5 class="fw-bold mb-4"><i class="bi bi-person-lines-fill text-primary me-2"></i> Personal & Medical Information</h5>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-bold">First Name <i class="bi bi-lock-fill ms-1" title="Locked Field"></i></label>
+                                <input type="text" class="form-control bg-light" value="<?php echo htmlspecialchars($patient['first_name']); ?>" readonly>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-bold">Last Name <i class="bi bi-lock-fill ms-1" title="Locked Field"></i></label>
+                                <input type="text" class="form-control bg-light" value="<?php echo htmlspecialchars($patient['last_name']); ?>" readonly>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-bold">Phone Number</label>
+                                <input type="text" name="phone" class="form-control" value="<?php echo htmlspecialchars($patient['phone'] ?? ''); ?>">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-bold">Date of Birth</label>
+                                <input type="date" name="date_of_birth" class="form-control" value="<?php echo htmlspecialchars($patient['date_of_birth'] ?? ''); ?>">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-muted small fw-bold">Blood Type</label>
+                                <select name="blood_type" class="form-select">
+                                    <option value="">Select...</option>
+                                    <?php $types = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+                                    foreach ($types as $type) {
+                                        $selected = ($patient['blood_type'] == $type) ? 'selected' : '';
+                                        echo "<option value=\"$type\" $selected>$type</option>";
+                                    } ?>
+                                </select>
+                            </div>
+                            <div class="col-12 mt-3">
+                                <label class="form-label text-muted small fw-bold">Brief Medical History / Known Allergies</label>
+                                <textarea name="medical_history" class="form-control" rows="4" placeholder="List any chronic conditions or allergies here..."><?php echo htmlspecialchars($patient['medical_history'] ?? ''); ?></textarea>
+                            </div>
+                        </div>
+                        <button type="submit" name="update_profile" class="btn btn-primary rounded-pill mt-4 px-4 fw-bold">Save Changes</button>
+                    </form>
                 </div>
-                <button type="submit" name="update_profile" class="btn btn-primary rounded-pill mt-4 px-4 fw-bold">Save Changes</button>
-            </form>
+            </div>
+
+            <!-- Pregnancy Cycle Management Card -->
+            <div class="col-xl-4">
+                <div class="card border-0 shadow-sm rounded-4 p-4 h-100" style="background: linear-gradient(135deg, #ffffff 0%, #fef6f7 100%);">
+                    <h5 class="fw-bold mb-3" style="color: var(--accent-color);"><i class="bi bi-arrow-repeat me-2"></i> Pregnancy Cycle</h5>
+                    <p class="small text-muted mb-4">
+                        Registering a new pregnancy or updating your due date will automatically <strong>reset your active dashboard timeline</strong>.
+                        Don't worry, your past vitals and records are safely archived in your full medical history.
+                    </p>
+
+                    <div class="p-3 bg-white rounded-3 border mb-4 text-center">
+                        <small class="text-uppercase fw-bold text-muted d-block mb-1">Current Expected Due Date</small>
+                        <h4 class="mb-0 fw-bold text-dark">
+                            <?php echo $patient['expected_due_date'] ? date('F j, Y', strtotime($patient['expected_due_date'])) : 'Not Set'; ?>
+                        </h4>
+                    </div>
+
+                    <form action="profile.php" method="POST">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-bold">Enter New Due Date *</label>
+                            <input type="date" name="expected_due_date" class="form-control border-danger border-opacity-25" required>
+                        </div>
+                        <button type="submit" name="start_new_pregnancy" class="btn btn-danger w-100 rounded-pill fw-bold shadow-sm" onclick="return confirm('Are you sure you want to reset your pregnancy timeline to a new cycle?');">
+                            <i class="bi bi-stars me-1"></i> Start New Journey
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
     </main>
     <script>

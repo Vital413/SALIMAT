@@ -1,5 +1,5 @@
 <?php
-// patient/appointments.php - View upcoming appointments and request new ones
+// patient/lab_results.php - View Laboratory Test Status and Results
 require_once '../config/config.php';
 
 if (!isset($_SESSION['patient_id']) || $_SESSION['role'] !== 'patient') {
@@ -8,73 +8,32 @@ if (!isset($_SESSION['patient_id']) || $_SESSION['role'] !== 'patient') {
 }
 
 $patient_id = $_SESSION['patient_id'];
-$success_msg = '';
 $error_msg = '';
 
-// Fetch Patient's assigned doctor
 try {
-    $docStmt = $pdo->prepare("SELECT doctor_id FROM patients WHERE patient_id = ?");
-    $docStmt->execute([$patient_id]);
-    $assigned_doctor = $docStmt->fetchColumn();
-} catch (PDOException $e) {
-    $assigned_doctor = null;
-}
-
-// Handle Appointment Scheduling directly
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_appointment'])) {
-    if ($assigned_doctor) {
-        $apt_date = $_POST['appointment_date'];
-        $reason = trim(filter_input(INPUT_POST, 'reason', FILTER_SANITIZE_STRING));
-
-        try {
-            // 1. Insert the appointment directly into the appointments table so it shows on the doctor's dashboard
-            $stmt = $pdo->prepare("INSERT INTO appointments (patient_id, doctor_id, appointment_date, status, notes) VALUES (?, ?, ?, 'scheduled', ?)");
-
-            if ($stmt->execute([$patient_id, $assigned_doctor, $apt_date, $reason])) {
-                $success_msg = "Your appointment has been successfully scheduled with your provider.";
-
-                // 2. Format a clean notification message for the doctor's inbox
-                $msg_body = "🗓️ *New Appointment Scheduled*\nDate: " . date('F j, Y g:i A', strtotime($apt_date)) . "\nReason: " . ($reason ? $reason : "Routine checkup/Follow-up");
-
-                // 3. Send the automated message
-                $msgStmt = $pdo->prepare("INSERT INTO messages (sender_id, sender_role, receiver_id, receiver_role, message_body) VALUES (?, 'patient', ?, 'doctor', ?)");
-                $msgStmt->execute([$patient_id, $assigned_doctor, $msg_body]);
-            } else {
-                $error_msg = "Failed to schedule appointment. Please try again.";
-            }
-        } catch (PDOException $e) {
-            $error_msg = "System error occurred while scheduling the appointment.";
-        }
-    } else {
-        $error_msg = "You do not have a provider assigned yet to schedule this appointment.";
-    }
-}
-
-// Fetch Appointments & Sidebar Data
-try {
-    // Appointments list
+    // 1. Fetch all lab tests for this patient
     $stmt = $pdo->prepare("
-        SELECT a.*, d.first_name as doc_first, d.last_name as doc_last 
-        FROM appointments a 
-        LEFT JOIN doctors d ON a.doctor_id = d.doctor_id 
-        WHERE a.patient_id = ? 
-        ORDER BY a.appointment_date ASC
+        SELECT t.*, d.last_name AS doc_last 
+        FROM lab_tests t
+        LEFT JOIN doctors d ON t.doctor_id = d.doctor_id
+        WHERE t.patient_id = ?
+        ORDER BY t.created_at DESC
     ");
     $stmt->execute([$patient_id]);
-    $appointments = $stmt->fetchAll();
+    $lab_results = $stmt->fetchAll();
 
-    // Fetch Unpaid Billing Balance (for sidebar badge)
+    // 2. Fetch Unpaid Billing Balance (for sidebar badge)
     $billStmt = $pdo->prepare("SELECT SUM(amount - amount_paid) FROM billing WHERE patient_id = ? AND status != 'Paid'");
     $billStmt->execute([$patient_id]);
     $unpaid_balance = $billStmt->fetchColumn() ?: 0;
 
-    // Fetch Unread Messages Count (for sidebar badge)
+    // 3. Fetch Unread Messages Count (for sidebar badge)
     $msgStmt = $pdo->prepare("SELECT COUNT(*) FROM messages WHERE receiver_id = ? AND receiver_role = 'patient' AND is_read = 0");
     $msgStmt->execute([$patient_id]);
     $unread_msgs = $msgStmt->fetchColumn() ?: 0;
 } catch (PDOException $e) {
-    $error_msg = "Error loading appointments.";
-    $appointments = [];
+    $error_msg = "Error loading laboratory records.";
+    $lab_results = [];
     $unpaid_balance = 0;
     $unread_msgs = 0;
 }
@@ -85,13 +44,12 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Appointments - LuminaCare</title>
+    <title>Lab Results - LuminaCare Patient</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
 
     <style>
-        /* Shared Sidebar CSS - Patient Theme */
         :root {
             --primary-color: #2b7a78;
             --secondary-color: #3aafa9;
@@ -219,10 +177,57 @@ try {
                 display: block;
             }
         }
+
+        .result-card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
+            border: 1px solid rgba(0, 0, 0, 0.03);
+            margin-bottom: 15px;
+            transition: transform 0.2s ease;
+        }
+
+        .result-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+        }
+
+        .result-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .status-completed {
+            background: rgba(25, 135, 84, 0.1);
+            color: #198754;
+        }
+
+        .status-pending {
+            background: rgba(255, 193, 7, 0.1);
+            color: #d39e00;
+        }
+
+        .status-progress {
+            background: rgba(13, 202, 240, 0.1);
+            color: #0dcaf0;
+        }
+
+        .status-cancelled {
+            background: rgba(220, 53, 69, 0.1);
+            color: #dc3545;
+        }
     </style>
 </head>
 
 <body>
+
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
         <div class="d-flex justify-content-between align-items-center pe-3">
@@ -236,7 +241,7 @@ try {
 
             <div class="nav-item mt-3 mb-1"><small class="text-muted px-4 fw-bold text-uppercase" style="font-size: 0.75rem;">Clinical Data</small></div>
             <div class="nav-item"><a href="tools.php" class="nav-link"><i class="bi bi-heartbreak"></i> Tools & Medications</a></div>
-            <div class="nav-item"><a href="lab_results.php" class="nav-link"><i class="bi bi-file-medical"></i> Lab Results</a></div>
+            <div class="nav-item"><a href="lab_results.php" class="nav-link active"><i class="bi bi-file-medical-fill"></i> Lab Results</a></div>
 
             <div class="nav-item mt-3 mb-1"><small class="text-muted px-4 fw-bold text-uppercase" style="font-size: 0.75rem;">Manage</small></div>
             <div class="nav-item">
@@ -251,7 +256,7 @@ try {
                     <?php if ($unread_msgs > 0): ?><span class="badge bg-primary rounded-pill ms-auto"><?php echo $unread_msgs; ?></span><?php endif; ?>
                 </a>
             </div>
-            <div class="nav-item"><a href="appointments.php" class="nav-link active"><i class="bi bi-calendar-check-fill"></i> Appointments</a></div>
+            <div class="nav-item"><a href="appointments.php" class="nav-link"><i class="bi bi-calendar-check"></i> Appointments</a></div>
 
             <div class="nav-item mt-3 mb-1"><small class="text-muted px-4 fw-bold text-uppercase" style="font-size: 0.75rem;">Account</small></div>
             <div class="nav-item"><a href="profile.php" class="nav-link"><i class="bi bi-person-gear"></i> Profile Settings</a></div>
@@ -263,104 +268,116 @@ try {
         <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <button class="mobile-toggle" id="openSidebar"><i class="bi bi-list"></i></button>
-                <h3 class="mb-0 fw-bold">My Appointments</h3>
+                <h3 class="mb-0 fw-bold">My Laboratory Results</h3>
             </div>
-            <button class="btn btn-primary rounded-pill px-4 fw-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#requestAptModal">
-                <i class="bi bi-calendar-plus me-1"></i> Schedule Appointment
-            </button>
         </div>
 
-        <?php if (!empty($success_msg)): ?><div class="alert alert-success border-0 shadow-sm rounded-3"><i class="bi bi-check-circle-fill me-2"></i> <?php echo $success_msg; ?></div><?php endif; ?>
-        <?php if (!empty($error_msg)): ?><div class="alert alert-danger border-0 shadow-sm rounded-3"><i class="bi bi-exclamation-triangle-fill me-2"></i> <?php echo $error_msg; ?></div><?php endif; ?>
+        <?php if (!empty($error_msg)): ?>
+            <div class="alert alert-danger border-0 shadow-sm rounded-3"><i class="bi bi-exclamation-triangle-fill me-2"></i> <?php echo $error_msg; ?></div>
+        <?php endif; ?>
 
-        <div class="card border-0 shadow-sm rounded-4 overflow-hidden">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
-                        <thead class="table-light text-muted" style="font-size: 0.85rem; text-transform: uppercase;">
-                            <tr>
-                                <th class="ps-4">Date & Time</th>
-                                <th>Provider</th>
-                                <th>Status</th>
-                                <th>Notes/Instructions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (isset($appointments) && count($appointments) > 0): ?>
-                                <?php foreach ($appointments as $apt): ?>
-                                    <tr>
-                                        <td class="ps-4">
-                                            <div class="fw-bold"><?php echo date('F j, Y', strtotime($apt['appointment_date'])); ?></div>
-                                            <small class="text-muted"><?php echo date('h:i A', strtotime($apt['appointment_date'])); ?></small>
-                                        </td>
-                                        <td>
-                                            <?php if ($apt['doc_last']): ?>
-                                                Dr. <?php echo htmlspecialchars($apt['doc_last']); ?>
-                                            <?php else: ?>
-                                                <span class="text-muted small">Pending Assignment</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php
-                                            if ($apt['status'] == 'scheduled') echo '<span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2 py-1 rounded-pill">Upcoming</span>';
-                                            elseif ($apt['status'] == 'completed') echo '<span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2 py-1 rounded-pill">Completed</span>';
-                                            else echo '<span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 px-2 py-1 rounded-pill">Cancelled</span>';
-                                            ?>
-                                        </td>
-                                        <td><?php echo $apt['notes'] ? htmlspecialchars($apt['notes']) : '<span class="text-muted small">No specific instructions</span>'; ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="4" class="text-center py-5 text-muted">
-                                        <i class="bi bi-calendar-x fs-2 d-block mb-2"></i>
-                                        No appointments scheduled yet.<br>Click "Schedule Appointment" to set up a checkup.
-                                    </td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
+        <div class="row">
+            <div class="col-lg-12">
+                <?php if (count($lab_results) > 0): ?>
+                    <?php foreach ($lab_results as $test): ?>
+                        <?php
+                        $status_class = 'status-pending';
+                        $icon = 'bi-hourglass-split';
+                        if ($test['status'] == 'Completed') {
+                            $status_class = 'status-completed';
+                            $icon = 'bi-check2-all';
+                        } elseif ($test['status'] == 'In Progress') {
+                            $status_class = 'status-progress';
+                            $icon = 'bi-gear-fill';
+                        } elseif ($test['status'] == 'Cancelled') {
+                            $status_class = 'status-cancelled';
+                            $icon = 'bi-x-circle';
+                        }
+                        ?>
+                        <div class="result-card d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="result-icon <?php echo $status_class; ?>">
+                                    <i class="bi <?php echo $icon; ?>"></i>
+                                </div>
+                                <div>
+                                    <h5 class="fw-bold mb-1 text-dark"><?php echo htmlspecialchars($test['test_name']); ?></h5>
+                                    <div class="text-muted small">
+                                        <i class="bi bi-calendar-event me-1"></i> Requested: <?php echo date('M d, Y', strtotime($test['created_at'])); ?>
+                                        <?php if ($test['doc_last']): ?>
+                                            &nbsp;|&nbsp; <i class="bi bi-person me-1"></i> Dr. <?php echo htmlspecialchars($test['doc_last']); ?>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex flex-column flex-md-row align-items-md-center gap-3">
+                                <span class="badge <?php echo $status_class; ?> px-3 py-2 rounded-pill border border-opacity-25" style="border-color: inherit;">
+                                    <?php echo htmlspecialchars($test['status']); ?>
+                                </span>
+
+                                <?php if ($test['status'] == 'Completed'): ?>
+                                    <button class="btn btn-sm btn-outline-primary rounded-pill px-4 fw-bold" data-bs-toggle="modal" data-bs-target="#viewResultModal<?php echo $test['test_id']; ?>">
+                                        View Report
+                                    </button>
+                                <?php else: ?>
+                                    <button class="btn btn-sm btn-light border rounded-pill px-4 fw-bold text-muted" disabled>
+                                        Pending...
+                                    </button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <!-- View Result Modal (Only generated for completed tests) -->
+                        <?php if ($test['status'] == 'Completed'): ?>
+                            <div class="modal fade" id="viewResultModal<?php echo $test['test_id']; ?>" tabindex="-1">
+                                <div class="modal-dialog modal-dialog-centered">
+                                    <div class="modal-content border-0 rounded-4 shadow-lg">
+                                        <div class="modal-header border-bottom-0 pb-0">
+                                            <h5 class="modal-title fw-bold"><i class="bi bi-file-earmark-medical-fill text-success me-2"></i> Official Lab Report</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body pt-3">
+                                            <div class="p-3 bg-light rounded-3 border mb-3">
+                                                <h6 class="fw-bold mb-1 text-dark"><?php echo htmlspecialchars($test['test_name']); ?></h6>
+                                                <div class="d-flex justify-content-between small text-muted mt-2">
+                                                    <span><i class="bi bi-calendar-check me-1"></i> Completed: <?php echo date('M d, Y', strtotime($test['updated_at'])); ?></span>
+                                                    <span>Ref: #<?php echo str_pad($test['test_id'], 6, '0', STR_PAD_LEFT); ?></span>
+                                                </div>
+                                            </div>
+
+                                            <div class="mb-4">
+                                                <h6 class="fw-bold text-uppercase text-muted small mb-2">Diagnostic Findings & Notes</h6>
+                                                <div class="p-3 bg-white border rounded-3 text-dark" style="font-size: 0.95rem; line-height: 1.6;">
+                                                    <?php echo nl2br(htmlspecialchars($test['result_notes'] ?? 'No additional notes provided.')); ?>
+                                                </div>
+                                            </div>
+
+                                            <div class="alert alert-info border-0 shadow-sm py-2 px-3 small d-flex gap-2 align-items-center mb-0">
+                                                <i class="bi bi-info-circle-fill fs-5"></i>
+                                                <div>Please discuss these results with your healthcare provider during your next consultation.</div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer border-top-0 pt-0">
+                                            <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">Close</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="text-center py-5">
+                        <div class="d-inline-flex align-items-center justify-content-center bg-white rounded-circle shadow-sm mb-3" style="width: 80px; height: 80px;">
+                            <i class="bi bi-clipboard2-x fs-1 text-muted opacity-50"></i>
+                        </div>
+                        <h5 class="fw-bold text-dark">No Laboratory Records Found</h5>
+                        <p class="text-muted">You do not have any requested or completed lab tests at this time.</p>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
     </main>
-
-    <!-- Modal for Requesting Appointment -->
-    <div class="modal fade" id="requestAptModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 rounded-4 shadow-lg">
-                <div class="modal-header border-bottom-0 pb-0">
-                    <h5 class="modal-title fw-bold">Schedule an Appointment</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body pt-3">
-                    <?php if ($assigned_doctor): ?>
-                        <p class="text-muted small mb-4">Select your preferred date and time. This will automatically schedule the appointment with your assigned healthcare provider.</p>
-                        <form action="" method="POST">
-                            <div class="mb-3">
-                                <label class="form-label text-muted small fw-bold">Date & Time *</label>
-                                <input type="datetime-local" class="form-control bg-light border-0" name="appointment_date" required min="<?php echo date('Y-m-d\TH:i'); ?>">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label text-muted small fw-bold">Reason for Visit (Optional)</label>
-                                <textarea class="form-control bg-light border-0" name="reason" rows="3" placeholder="e.g., Doctor requested follow-up, Routine checkup, etc."></textarea>
-                            </div>
-                            <div class="d-grid mt-4">
-                                <button type="submit" name="request_appointment" class="btn btn-primary rounded-pill fw-bold py-2">Schedule Appointment</button>
-                            </div>
-                        </form>
-                    <?php else: ?>
-                        <div class="text-center py-4">
-                            <i class="bi bi-person-x text-danger fs-1 mb-3 d-block"></i>
-                            <h6 class="fw-bold">No Provider Assigned</h6>
-                            <p class="text-muted small">You cannot schedule an appointment until an administrator assigns a doctor to your account.</p>
-                            <button type="button" class="btn btn-secondary rounded-pill mt-2" data-bs-dismiss="modal">Close</button>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Log Vitals Modal (Submits back to dashboard for central processing) -->
     <div class="modal fade" id="logVitalsModal" tabindex="-1">

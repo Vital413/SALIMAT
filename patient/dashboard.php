@@ -1,5 +1,5 @@
 <?php
-// patient/dashboard.php - Patient Main Dashboard with Data Visualization & Timeline
+// patient/dashboard.php - Patient Main Dashboard with Cycle-Isolated History
 require_once '../config/config.php';
 
 if (!isset($_SESSION['patient_id']) || $_SESSION['role'] !== 'patient') {
@@ -11,7 +11,7 @@ $patient_id = $_SESSION['patient_id'];
 $success_msg = '';
 $error_msg = '';
 
-// 1. Fetch assigned doctor info FIRST (Needed for Smart Alerts & Display)
+// 1. Fetch assigned doctor & expected due date
 try {
     $docStmt = $pdo->prepare("SELECT p.expected_due_date, d.doctor_id, d.first_name, d.last_name, d.specialization, d.email AS doc_email FROM patients p LEFT JOIN doctors d ON p.doctor_id = d.doctor_id WHERE p.patient_id = ?");
     $docStmt->execute([$patient_id]);
@@ -33,7 +33,68 @@ try {
     $patient_info = ['expected_due_date' => null];
 }
 
-// 2. Handle Vital Logging Form Submission & Smart Alerts
+// --- 2. PREGNANCY TIMELINE & CYCLE FILTER CALCULATION ---
+$due_date = $patient_info['expected_due_date'] ?? null;
+$conception_date_str = '1970-01-01 00:00:00'; // Default fallback to show all history
+$weeks_pregnant = 0;
+$days_pregnant = 0;
+$progress_percent = 0;
+$milestone_text = "Set your due date in Profile Settings to see your pregnancy timeline.";
+$trimester = 0;
+
+if ($due_date) {
+    // Determine start of current pregnancy to filter dashboard widgets
+    $conception_date = date('Y-m-d', strtotime($due_date . ' - 280 days'));
+    $conception_date_str = $conception_date . ' 00:00:00';
+
+    $today = date('Y-m-d');
+    $datetime1 = new DateTime($conception_date);
+    $datetime2 = new DateTime($today);
+
+    if ($datetime2 >= $datetime1) {
+        $interval = $datetime1->diff($datetime2);
+        $total_days = $interval->format('%a');
+
+        if ($total_days <= 280) {
+            $weeks_pregnant = floor($total_days / 7);
+            $days_pregnant = $total_days % 7;
+            $progress_percent = min(100, ($total_days / 280) * 100);
+
+            if ($weeks_pregnant < 13) $trimester = 1;
+            elseif ($weeks_pregnant < 27) $trimester = 2;
+            else $trimester = 3;
+
+            $milestones = [
+                4 => "Your baby is the size of a poppy seed.",
+                8 => "Your baby is the size of a raspberry.",
+                12 => "Your baby is the size of a plum. First trimester almost done!",
+                16 => "Your baby is the size of an avocado.",
+                20 => "Halfway there! Your baby is the size of a banana.",
+                24 => "Your baby is the size of a cantaloupe.",
+                28 => "Third trimester begins! Baby is the size of an eggplant.",
+                32 => "Your baby is the size of a squash.",
+                36 => "Almost time! Your baby is the size of a papaya.",
+                40 => "You made it! Your baby is the size of a small pumpkin."
+            ];
+
+            $closest_week = floor($weeks_pregnant / 4) * 4;
+            if ($closest_week < 4) $closest_week = 4;
+
+            if (isset($milestones[$closest_week])) {
+                $milestone_text = "Week $weeks_pregnant: " . $milestones[$closest_week];
+            } else {
+                $milestone_text = "Week $weeks_pregnant: Your baby is growing beautifully!";
+            }
+        } else {
+            $progress_percent = 100;
+            $weeks_pregnant = 40;
+            $milestone_text = "You have reached or passed your expected due date!";
+            $trimester = 3;
+        }
+    }
+}
+
+// 3. Handle Vital Logging Form Submission & Smart Alerts
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['log_vitals'])) {
     $sys_bp = filter_input(INPUT_POST, 'systolic_bp', FILTER_SANITIZE_NUMBER_INT);
     $dia_bp = filter_input(INPUT_POST, 'diastolic_bp', FILTER_SANITIZE_NUMBER_INT);
@@ -49,32 +110,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['log_vitals'])) {
             $stmt = $pdo->prepare("INSERT INTO vitals (patient_id, systolic_bp, diastolic_bp, heart_rate, weight_kg, blood_sugar_mgdl, symptoms_notes) VALUES (?, ?, ?, ?, ?, ?, ?)");
             if ($stmt->execute([$patient_id, $sys_bp, $dia_bp, $heart_rate, $weight, $blood_sugar, $symptoms])) {
 
-                $vital_id = $pdo->lastInsertId(); // Get the ID of the vital just logged
+                $vital_id = $pdo->lastInsertId();
                 $success_msg = "Vitals logged successfully!";
 
-                // --- SMART ALERTS & NOTIFICATION SYSTEM ---
-                // Trigger condition: High Blood Pressure (Pre-eclampsia warning)
                 if ($sys_bp >= 140 || $dia_bp >= 90) {
                     if ($assigned_doctor && $assigned_doctor['doctor_id']) {
-
-                        // Log alert into the database for the Doctor's Dashboard
                         $alert_msg = "Critical Blood Pressure logged: {$sys_bp}/{$dia_bp} mmHg. Immediate review recommended.";
                         $astmt = $pdo->prepare("INSERT INTO alerts (patient_id, doctor_id, vital_id, alert_type, alert_message) VALUES (?, ?, ?, 'High Blood Pressure', ?)");
                         $astmt->execute([$patient_id, $assigned_doctor['doctor_id'], $vital_id, $alert_msg]);
 
-                        // Send Email Notification to the Doctor
                         $to = $assigned_doctor['email'];
                         $subject = "URGENT: Maternal Health Alert - LuminaCare";
-                        $message = "Dr. " . $assigned_doctor['last_name'] . ",\n\nYour patient, " . $_SESSION['first_name'] . " " . $_SESSION['last_name'] . ", just logged a critical blood pressure reading of {$sys_bp}/{$dia_bp} mmHg.\n\nPlease log in to the LuminaCare Provider Portal immediately to review their chart and initiate a telehealth consultation if necessary.\n\n- LuminaCare Automated System";
-                        $headers = "From: emergency@luminacare.com\r\n" . "Reply-To: no-reply@luminacare.com\r\n" . "X-Priority: 1 (Highest)";
-
+                        $message = "Dr. " . $assigned_doctor['last_name'] . ",\n\nYour patient, " . $_SESSION['first_name'] . " " . $_SESSION['last_name'] . ", just logged a critical blood pressure reading of {$sys_bp}/{$dia_bp} mmHg.\n\nPlease log in to the LuminaCare Provider Portal immediately to review their chart.\n\n- LuminaCare Automated System";
+                        $headers = "From: LuminaCare Emergency <no-reply@luminacaresec.com>\r\n" . "Reply-To: no-reply@luminacaresec.com\r\n" . "X-Priority: 1 (Highest)";
                         @mail($to, $subject, $message, $headers);
 
-                        // Alter the patient's success message to a critical warning
                         $success_msg = '';
-                        $error_msg = "<strong>Elevated Reading Detected!</strong> Your blood pressure is high ({$sys_bp}/{$dia_bp}). An urgent alert has been automatically sent to Dr. {$assigned_doctor['last_name']}. If you experience severe headaches, vision changes, or right-sided stomach pain, please go to the nearest emergency room immediately.";
+                        $error_msg = "<strong>Elevated Reading Detected!</strong> Your blood pressure is high ({$sys_bp}/{$dia_bp}). An urgent alert has been automatically sent to Dr. {$assigned_doctor['last_name']}. If you experience severe symptoms, please go to the nearest emergency room immediately.";
                     } else {
-                        // High BP, but no doctor assigned
                         $success_msg = '';
                         $error_msg = "<strong>Warning!</strong> Your blood pressure is elevated ({$sys_bp}/{$dia_bp}), but you do not have an assigned provider yet. Please contact a local clinic or emergency room if you feel unwell.";
                     }
@@ -88,15 +141,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['log_vitals'])) {
     }
 }
 
-// 3. Fetch Latest Vitals for Dashboard Cards & Charts & Calculate Timeline
+// 4. Fetch Dashboard Data (Filtered by Current Pregnancy Cycle)
 try {
-    $stmt = $pdo->prepare("SELECT * FROM vitals WHERE patient_id = ? ORDER BY recorded_at ASC LIMIT 10");
-    $stmt->execute([$patient_id]);
+    // Vitals History - Isolated to current cycle
+    $stmt = $pdo->prepare("SELECT * FROM vitals WHERE patient_id = ? AND recorded_at >= ? ORDER BY recorded_at ASC LIMIT 10");
+    $stmt->execute([$patient_id, $conception_date_str]);
     $chart_vitals = $stmt->fetchAll();
 
-    // Sort descending for the table and latest card
     $recent_vitals = array_reverse($chart_vitals);
     $latest_vital = $recent_vitals[0] ?? null;
+
+    // Unpaid Billing Balance
+    try {
+        $billStmt = $pdo->prepare("SELECT SUM(amount - amount_paid) FROM billing WHERE patient_id = ? AND status != 'Paid'");
+        $billStmt->execute([$patient_id]);
+        $unpaid_balance = $billStmt->fetchColumn() ?: 0;
+    } catch (PDOException $e) {
+        $unpaid_balance = 0;
+    }
+
+    // Recent Lab Tests - Isolated to current cycle
+    try {
+        $labStmt = $pdo->prepare("SELECT test_name, status, updated_at FROM lab_tests WHERE patient_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 4");
+        $labStmt->execute([$patient_id, $conception_date_str]);
+        $recent_labs = $labStmt->fetchAll();
+    } catch (PDOException $e) {
+        $recent_labs = [];
+    }
+
+    // Unread Messages Count
+    try {
+        $msgStmt = $pdo->prepare("SELECT COUNT(*) FROM messages WHERE receiver_id = ? AND receiver_role = 'patient' AND is_read = 0");
+        $msgStmt->execute([$patient_id]);
+        $unread_msgs = $msgStmt->fetchColumn() ?: 0;
+    } catch (PDOException $e) {
+        $unread_msgs = 0;
+    }
 
     // Prepare JSON data for Chart.js
     $chart_dates = [];
@@ -107,67 +187,6 @@ try {
         $chart_dates[] = date('M d', strtotime($v['recorded_at']));
         $chart_sys[] = $v['systolic_bp'];
         $chart_dia[] = $v['diastolic_bp'];
-    }
-
-    // --- PREGNANCY TIMELINE CALCULATION LOGIC ---
-    $due_date = $patient_info['expected_due_date'] ?? null;
-    $weeks_pregnant = 0;
-    $days_pregnant = 0;
-    $progress_percent = 0;
-    $milestone_text = "Set your due date in Profile Settings to see your pregnancy timeline.";
-    $trimester = 0;
-
-    if ($due_date) {
-        // Average pregnancy is 280 days (40 weeks) from last menstrual period
-        $conception_date = date('Y-m-d', strtotime($due_date . ' - 280 days'));
-        $today = date('Y-m-d');
-
-        $datetime1 = new DateTime($conception_date);
-        $datetime2 = new DateTime($today);
-
-        if ($datetime2 >= $datetime1) {
-            $interval = $datetime1->diff($datetime2);
-            $total_days = $interval->format('%a');
-
-            if ($total_days <= 280) {
-                $weeks_pregnant = floor($total_days / 7);
-                $days_pregnant = $total_days % 7;
-                $progress_percent = min(100, ($total_days / 280) * 100);
-
-                if ($weeks_pregnant < 13) $trimester = 1;
-                elseif ($weeks_pregnant < 27) $trimester = 2;
-                else $trimester = 3;
-
-                // Fun Baby Size Milestones
-                $milestones = [
-                    4 => "Your baby is the size of a poppy seed.",
-                    8 => "Your baby is the size of a raspberry.",
-                    12 => "Your baby is the size of a plum. First trimester almost done!",
-                    16 => "Your baby is the size of an avocado.",
-                    20 => "Halfway there! Your baby is the size of a banana.",
-                    24 => "Your baby is the size of a cantaloupe.",
-                    28 => "Third trimester begins! Baby is the size of an eggplant.",
-                    32 => "Your baby is the size of a squash.",
-                    36 => "Almost time! Your baby is the size of a papaya.",
-                    40 => "You made it! Your baby is the size of a small pumpkin."
-                ];
-
-                // Find closest milestone milestone
-                $closest_week = floor($weeks_pregnant / 4) * 4;
-                if ($closest_week < 4) $closest_week = 4;
-
-                if (isset($milestones[$closest_week])) {
-                    $milestone_text = "Week $weeks_pregnant: " . $milestones[$closest_week];
-                } else {
-                    $milestone_text = "Week $weeks_pregnant: Your baby is growing beautifully!";
-                }
-            } else {
-                $progress_percent = 100;
-                $weeks_pregnant = 40;
-                $milestone_text = "You have reached or passed your expected due date!";
-                $trimester = 3;
-            }
-        }
     }
 } catch (PDOException $e) {
     $error_msg = "Error loading dashboard data.";
@@ -183,10 +202,7 @@ try {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Include Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Include Jitsi External API -->
-    <script src="https://meet.ffmuc.net/external_api.js"></script>
 
     <style>
         :root {
@@ -225,6 +241,16 @@ try {
             transition: all 0.3s;
             display: flex;
             flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #e1e5e8;
+            border-radius: 10px;
         }
 
         .sidebar-brand {
@@ -291,7 +317,6 @@ try {
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
         }
 
-        /* Timeline specific CSS */
         .timeline-card {
             background: linear-gradient(135deg, #ffffff 0%, #fef6f7 100%);
             border-radius: 20px;
@@ -453,10 +478,27 @@ try {
         <div class="nav-menu">
             <div class="nav-item"><a href="dashboard.php" class="nav-link active"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a></div>
             <div class="nav-item"><a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#logVitalsModal"><i class="bi bi-clipboard2-pulse"></i> Log Vitals</a></div>
-            <div class="nav-item"><a href="tools.php" class="nav-link"><i class="bi bi-heartbreak"></i> Pregnancy Tools</a></div>
-            <div class="nav-item"><a href="messages.php" class="nav-link"><i class="bi bi-chat-dots"></i> Messages</a></div>
+
+            <div class="nav-item mt-3 mb-1"><small class="text-muted px-4 fw-bold text-uppercase" style="font-size: 0.75rem;">Clinical Data</small></div>
+            <div class="nav-item"><a href="tools.php" class="nav-link"><i class="bi bi-heartbreak"></i> Tools & Medications</a></div>
+            <div class="nav-item"><a href="lab_results.php" class="nav-link"><i class="bi bi-file-medical"></i> Lab Results</a></div>
+
+            <div class="nav-item mt-3 mb-1"><small class="text-muted px-4 fw-bold text-uppercase" style="font-size: 0.75rem;">Manage</small></div>
+            <div class="nav-item">
+                <a href="billing.php" class="nav-link">
+                    <i class="bi bi-receipt"></i> Billing & Invoices
+                    <?php if ($unpaid_balance > 0): ?><span class="badge bg-danger rounded-pill ms-auto">!</span><?php endif; ?>
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="messages.php" class="nav-link">
+                    <i class="bi bi-chat-dots"></i> Messages
+                    <?php if ($unread_msgs > 0): ?><span class="badge bg-primary rounded-pill ms-auto"><?php echo $unread_msgs; ?></span><?php endif; ?>
+                </a>
+            </div>
             <div class="nav-item"><a href="appointments.php" class="nav-link"><i class="bi bi-calendar-check"></i> Appointments</a></div>
-            <div class="nav-item mt-4"><small class="text-muted px-4 fw-bold text-uppercase" style="font-size: 0.75rem;">Account</small></div>
+
+            <div class="nav-item mt-3 mb-1"><small class="text-muted px-4 fw-bold text-uppercase" style="font-size: 0.75rem;">Account</small></div>
             <div class="nav-item"><a href="profile.php" class="nav-link"><i class="bi bi-person-gear"></i> Profile Settings</a></div>
         </div>
         <div class="logout-wrapper"><a href="logout.php" class="btn btn-outline-danger w-100 rounded-pill fw-bold"><i class="bi bi-box-arrow-right me-2"></i> Log Out</a></div>
@@ -468,11 +510,22 @@ try {
                 <button class="mobile-toggle" id="openSidebar"><i class="bi bi-list"></i></button>
                 <div>
                     <h4 class="mb-0 fw-bold text-dark">Hello, <?php echo htmlspecialchars($_SESSION['first_name']); ?>!</h4>
-                    <p class="text-muted mb-0 small">Here is your daily health overview.</p>
+                    <p class="text-muted mb-0 small">Here is your daily health and account overview.</p>
                 </div>
             </div>
             <button class="btn btn-primary rounded-pill px-4 d-none d-md-block" data-bs-toggle="modal" data-bs-target="#logVitalsModal"><i class="bi bi-plus-lg me-2"></i>Log Vitals</button>
         </header>
+
+        <!-- Unpaid Billing Alert -->
+        <?php if ($unpaid_balance > 0): ?>
+            <div class="alert alert-warning border-warning border-opacity-25 shadow-sm rounded-3 d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <i class="bi bi-exclamation-triangle-fill text-warning fs-5 me-2 align-middle"></i>
+                    <strong>Outstanding Balance:</strong> You have <strong>$<?php echo number_format($unpaid_balance, 2); ?></strong> in pending medical invoices.
+                </div>
+                <a href="billing.php" class="btn btn-sm btn-dark rounded-pill fw-bold px-3">View Details</a>
+            </div>
+        <?php endif; ?>
 
         <?php if (!empty($success_msg)): ?><div class="alert alert-success border-0 shadow-sm"><i class="bi bi-check-circle-fill me-2"></i> <?php echo $success_msg; ?></div><?php endif; ?>
         <?php if (!empty($error_msg)): ?><div class="alert alert-danger border-0 shadow-sm"><i class="bi bi-exclamation-triangle-fill me-2"></i> <?php echo $error_msg; ?></div><?php endif; ?>
@@ -545,12 +598,11 @@ try {
                     <i class="bi bi-stethoscope position-absolute text-white opacity-25" style="font-size: 6rem; right: -10px; bottom: -20px;"></i>
                     <h6 class="text-white-50 text-uppercase fw-bold mb-1" style="font-size: 0.8rem; letter-spacing: 1px;">Assigned Provider</h6>
                     <?php if ($assigned_doctor && $assigned_doctor['first_name']): ?>
-                        <h4 class="fw-bold mb-0">Dr. <?php echo htmlspecialchars($assigned_doctor['last_name']); ?></h4>
-                        <p class="mb-3 opacity-75 small"><?php echo htmlspecialchars($assigned_doctor['specialization']); ?></p>
+                        <h4 class="fw-bold mb-0 text-truncate">Dr. <?php echo htmlspecialchars($assigned_doctor['last_name']); ?></h4>
+                        <p class="mb-3 opacity-75 small text-truncate"><?php echo htmlspecialchars($assigned_doctor['specialization']); ?></p>
                         <div class="d-flex flex-column gap-2 w-75 z-1">
                             <a href="messages.php" class="btn btn-light btn-sm rounded-pill fw-bold text-primary"><i class="bi bi-chat-dots me-1"></i> Message</a>
-                            <!-- NEW: Video Consultation Button -->
-                            <button class="btn btn-success btn-sm rounded-pill fw-bold text-white shadow" data-bs-toggle="modal" data-bs-target="#videoCallModal" onclick="startVideoCall()"><i class="bi bi-camera-video-fill me-1"></i> Telehealth Call</button>
+                            <button class="btn btn-warning btn-sm rounded-pill fw-bold text-dark shadow" data-bs-toggle="modal" data-bs-target="#comingSoonModal"><i class="bi bi-camera-video-fill me-1"></i> Telehealth Call</button>
                         </div>
                     <?php else: ?>
                         <h5 class="fw-bold mb-0">Pending Assignment</h5>
@@ -564,48 +616,99 @@ try {
         <div class="chart-container">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h5 class="fw-bold mb-0"><i class="bi bi-graph-up-arrow text-primary me-2"></i> Blood Pressure Trends</h5>
-                <span class="badge bg-light text-dark border">Last 10 Readings</span>
+                <span class="badge bg-light text-dark border">Current Pregnancy</span>
             </div>
             <canvas id="bpChart" height="80"></canvas>
         </div>
 
-        <!-- Recent History Table -->
-        <div class="card border-0 shadow-sm rounded-4 overflow-hidden mb-4">
-            <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
-                <h5 class="mb-0 fw-bold">Recent Vitals History</h5>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light text-muted" style="font-size: 0.85rem; text-transform: uppercase;">
-                        <tr>
-                            <th class="ps-4">Date & Time</th>
-                            <th>Blood Pressure</th>
-                            <th>Heart Rate</th>
-                            <th>Weight</th>
-                            <th>Symptoms Logged</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (count($recent_vitals) > 0): ?>
-                            <?php foreach (array_slice($recent_vitals, 0, 5) as $vital): ?>
+        <!-- History Tables Row -->
+        <div class="row g-4 mb-4">
+
+            <!-- Recent Vitals Table -->
+            <div class="col-lg-7">
+                <div class="card border-0 shadow-sm rounded-4 overflow-hidden h-100">
+                    <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0 fw-bold"><i class="bi bi-clipboard2-data text-primary me-2"></i> Vitals (Current Cycle)</h5>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light text-muted small text-uppercase">
                                 <tr>
-                                    <td class="ps-4 text-muted">
-                                        <div class="fw-bold text-dark"><?php echo date('M d, Y', strtotime($vital['recorded_at'])); ?></div><small><?php echo date('h:i A', strtotime($vital['recorded_at'])); ?></small>
-                                    </td>
-                                    <td><span class="badge bg-light text-dark border"><?php echo $vital['systolic_bp'] . '/' . $vital['diastolic_bp']; ?> mmHg</span></td>
-                                    <td><?php echo $vital['heart_rate'] ? $vital['heart_rate'] . ' bpm' : '-'; ?></td>
-                                    <td><?php echo $vital['weight_kg'] ? $vital['weight_kg'] . ' kg' : '-'; ?></td>
-                                    <td><?php echo !empty($vital['symptoms_notes']) ? '<i class="bi bi-info-circle text-primary" title="Note Added"></i>' : '<span class="text-muted small">None</span>'; ?></td>
+                                    <th class="ps-4">Date</th>
+                                    <th>Blood Pressure</th>
+                                    <th>Heart Rate</th>
+                                    <th>Notes</th>
                                 </tr>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <tr>
-                                <td colspan="5" class="text-center py-4 text-muted">No vitals logged yet.</td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+                            </thead>
+                            <tbody>
+                                <?php if (count($recent_vitals) > 0): ?>
+                                    <?php foreach (array_slice($recent_vitals, 0, 5) as $vital): ?>
+                                        <tr>
+                                            <td class="ps-4 text-muted">
+                                                <div class="fw-bold text-dark"><?php echo date('M d', strtotime($vital['recorded_at'])); ?></div><small><?php echo date('h:i A', strtotime($vital['recorded_at'])); ?></small>
+                                            </td>
+                                            <td><span class="badge bg-light text-dark border"><?php echo $vital['systolic_bp'] . '/' . $vital['diastolic_bp']; ?> mmHg</span></td>
+                                            <td><?php echo $vital['heart_rate'] ? $vital['heart_rate'] . ' bpm' : '-'; ?></td>
+                                            <td><?php echo !empty($vital['symptoms_notes']) ? '<i class="bi bi-info-circle text-primary" title="' . htmlspecialchars($vital['symptoms_notes']) . '"></i>' : '-'; ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="4" class="text-center py-4 text-muted">No vitals logged in this pregnancy cycle.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
+
+            <!-- Recent Lab Results Table -->
+            <div class="col-lg-5">
+                <div class="card border-0 shadow-sm rounded-4 overflow-hidden h-100">
+                    <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0 fw-bold"><i class="bi bi-file-medical text-primary me-2"></i> Laboratory Status</h5>
+                        <a href="lab_results.php" class="btn btn-sm btn-link text-decoration-none">View All</a>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light text-muted small text-uppercase">
+                                <tr>
+                                    <th class="ps-4">Test Requested</th>
+                                    <th>Status</th>
+                                    <th>Last Update</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (count($recent_labs) > 0): ?>
+                                    <?php foreach ($recent_labs as $lab): ?>
+                                        <tr>
+                                            <td class="ps-4 fw-bold text-dark"><?php echo htmlspecialchars($lab['test_name']); ?></td>
+                                            <td>
+                                                <?php
+                                                $badge = 'secondary';
+                                                if ($lab['status'] == 'Completed') $badge = 'success';
+                                                elseif ($lab['status'] == 'In Progress') $badge = 'primary';
+                                                elseif ($lab['status'] == 'Pending') $badge = 'warning text-dark';
+                                                ?>
+                                                <span class="badge bg-<?php echo $badge; ?> bg-opacity-10 text-<?php echo $badge; ?> border border-<?php echo $badge; ?> border-opacity-25 px-2 py-1 rounded-pill">
+                                                    <?php echo $lab['status']; ?>
+                                                </span>
+                                            </td>
+                                            <td class="small text-muted"><?php echo date('M d', strtotime($lab['updated_at'])); ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="3" class="text-center py-5 text-muted">No laboratory tests on record for this cycle.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </main>
 
@@ -634,24 +737,22 @@ try {
         </div>
     </div>
 
-    <!-- Video Consultation Modal -->
-    <div class="modal fade" id="videoCallModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
-        <div class="modal-dialog modal-xl modal-dialog-centered">
-            <div class="modal-content border-0 rounded-4 shadow-lg overflow-hidden">
-                <div class="modal-header bg-dark text-white border-bottom-0 pb-3">
-                    <h5 class="modal-title fw-bold"><i class="bi bi-camera-video-fill text-success me-2"></i> Telehealth Consultation</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" onclick="endVideoCall()"></button>
+    <!-- Coming Soon Modal (Replaces Video Consultation Modal) -->
+    <div class="modal fade" id="comingSoonModal" tabindex="-1" aria-labelledby="comingSoonModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 rounded-4 shadow-lg">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold" id="comingSoonModalLabel"><i class="bi bi-camera-video-fill me-2 text-warning"></i>Telehealth Consultation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body p-0 bg-black" style="height: 70vh;">
-                    <div id="jitsi-container" class="w-100 h-100 d-flex align-items-center justify-content-center text-white">
-                        <div class="text-center">
-                            <div class="spinner-border text-success mb-3" role="status"></div>
-                            <p>Connecting to secure video room...</p>
-                        </div>
-                    </div>
+                <div class="modal-body pt-3 text-center py-4">
+                    <i class="bi bi-tools display-1 text-warning mb-3 d-block"></i>
+                    <h4 class="fw-bold">Coming Soon!</h4>
+                    <p class="text-muted mt-2">We're working hard to integrate seamless video consultations with your healthcare provider. This feature will be available in an upcoming release.</p>
+                    <p class="mb-0 small text-muted">Thank you for your patience and understanding.</p>
                 </div>
-                <div class="modal-footer bg-dark border-top-0 pt-2 pb-3">
-                    <button type="button" class="btn btn-danger rounded-pill px-4 fw-bold" data-bs-dismiss="modal" onclick="endVideoCall()"><i class="bi bi-telephone-x-fill me-2"></i> End Call</button>
+                <div class="modal-footer border-0 pt-0 pb-4 justify-content-center">
+                    <button type="button" class="btn btn-primary rounded-pill px-4 fw-bold" data-bs-dismiss="modal">Got it</button>
                 </div>
             </div>
         </div>
@@ -663,7 +764,7 @@ try {
         document.getElementById('openSidebar')?.addEventListener('click', () => document.getElementById('sidebar').classList.add('show'));
         document.getElementById('closeSidebar')?.addEventListener('click', () => document.getElementById('sidebar').classList.remove('show'));
 
-        // Initialize Chart.js safely using PHP data injection
+        // Initialize Chart.js
         const chartDates = <?php echo json_encode($chart_dates); ?>;
         const sysData = <?php echo json_encode($chart_sys); ?>;
         const diaData = <?php echo json_encode($chart_dia); ?>;
@@ -695,6 +796,7 @@ try {
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
                     plugins: {
                         legend: {
                             position: 'top'
@@ -710,53 +812,7 @@ try {
                 }
             });
         } else {
-            // Hide chart canvas and show empty state if no data
             document.getElementById('bpChart').outerHTML = '<div class="text-center text-muted py-4">Not enough data to display chart. Log your vitals first!</div>';
-        }
-
-        // --- Video Consultation Logic (Jitsi Meet API) ---
-        let api = null;
-        // Generate a unique, secure room name based on the patient and doctor IDs
-        const roomName = "LuminaCare_Consult_P<?php echo $patient_id; ?>_D<?php echo $assigned_doctor['doctor_id'] ?? '0'; ?>";
-        const patientName = "<?php echo addslashes(htmlspecialchars($_SESSION['first_name'] . ' ' . $_SESSION['last_name'])); ?>";
-
-        function startVideoCall() {
-            const container = document.getElementById('jitsi-container');
-            container.innerHTML = ''; // Clear the loading spinner
-
-            const domain = 'meet.ffmuc.net'; // Using the no-login-required Jitsi community server
-            const options = {
-                roomName: roomName,
-                width: '100%',
-                height: '100%',
-                parentNode: container,
-                userInfo: {
-                    displayName: patientName
-                },
-                configOverwrite: {
-                    startWithAudioMuted: false,
-                    startWithVideoMuted: false,
-                    prejoinPageEnabled: false // Skip the prep page and go straight to the room
-                },
-                interfaceConfigOverwrite: {
-                    TOOLBAR_BUTTONS: [
-                        'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
-                        'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'raisehand',
-                        'videoquality', 'filmstrip', 'tileview'
-                    ],
-                }
-            };
-
-            api = new JitsiMeetExternalAPI(domain, options);
-        }
-
-        function endVideoCall() {
-            if (api) {
-                api.dispose(); // Destroys the iframe and turns off the camera
-                api = null;
-            }
-            // Reset the container for next time
-            document.getElementById('jitsi-container').innerHTML = '<div class="text-center"><div class="spinner-border text-success mb-3" role="status"></div><p>Connecting to secure video room...</p></div>';
         }
     </script>
 </body>

@@ -75,6 +75,9 @@ try {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
 
+    <!-- Include Jitsi External API for Telehealth -->
+    <script src="https://meet.ffmuc.net/external_api.js"></script>
+
     <style>
         :root {
             --primary-color: #1a4d6b;
@@ -112,6 +115,16 @@ try {
             display: flex;
             flex-direction: column;
             transition: all 0.3s;
+            overflow-y: auto;
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #e1e5e8;
+            border-radius: 10px;
         }
 
         .sidebar-brand {
@@ -196,28 +209,32 @@ try {
 </head>
 
 <body>
+    <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
         <div class="d-flex justify-content-between align-items-center pe-3">
             <a href="#" class="sidebar-brand"><i class="bi bi-heart-pulse-fill me-2"></i>Lumina<span>Care</span></a>
             <button class="btn-close d-lg-none" id="closeSidebar"></button>
         </div>
         <div class="nav-menu">
-            <div class="nav-item"><a href="dashboard.php" class="nav-link"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a></div>
-            <div class="nav-item"><a href="patients.php" class="nav-link"><i class="bi bi-people-fill"></i> My Patients</a></div>
-            <div class="nav-item">
-                <a href="messages.php" class="nav-link">
-                    <i class="bi bi-chat-dots-fill"></i> Messages
-                    <?php if ($unread_messages > 0): ?><span class="badge bg-danger rounded-pill ms-auto"><?php echo $unread_messages; ?></span><?php endif; ?>
-                </a>
-            </div>
-            <div class="nav-item"><a href="appointments.php" class="nav-link active"><i class="bi bi-calendar-check-fill"></i> Appointments</a></div>
-            <div class="nav-item"><a href="profile.php" class="nav-link"><i class="bi bi-gear-fill"></i> Profile Settings</a></div>
+            <a href="dashboard.php" class="nav-link"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
+            <a href="patients.php" class="nav-link"><i class="bi bi-people-fill"></i> My Patients</a>
+            <a href="messages.php" class="nav-link">
+                <i class="bi bi-chat-dots-fill"></i> Messages
+                <?php if ($unread_messages > 0): ?><span class="badge bg-danger rounded-pill ms-auto"><?php echo $unread_messages; ?></span><?php endif; ?>
+            </a>
+            <a href="appointments.php" class="nav-link active"><i class="bi bi-calendar-check-fill"></i> Appointments</a>
+
+            <div class="mt-4 px-4 small text-muted text-uppercase fw-bold">Clinical Logs</div>
+            <a href="records.php" class="nav-link"><i class="bi bi-folder-check"></i> EMR Directory</a>
+
+            <div class="mt-4 px-4 small text-muted text-uppercase fw-bold">Account</div>
+            <a href="profile.php" class="nav-link"><i class="bi bi-person-gear"></i> Settings</a>
         </div>
         <div class="logout-wrapper"><a href="logout.php" class="btn btn-outline-danger w-100 rounded-pill fw-bold"><i class="bi bi-box-arrow-right me-2"></i> Log Out</a></div>
     </nav>
 
     <main class="main-content">
-        <div class="d-flex align-items-center justify-content-between mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
             <div class="d-flex align-items-center gap-3">
                 <button class="mobile-toggle" id="openSidebar"><i class="bi bi-list"></i></button>
                 <h3 class="mb-0 fw-bold">Manage Appointments</h3>
@@ -227,13 +244,13 @@ try {
             </button>
         </div>
 
-        <?php if (!empty($success_msg)): ?><div class="alert alert-success border-0 shadow-sm"><i class="bi bi-check-circle-fill me-2"></i> <?php echo $success_msg; ?></div><?php endif; ?>
-        <?php if (!empty($error_msg)): ?><div class="alert alert-danger border-0 shadow-sm"><i class="bi bi-exclamation-triangle-fill me-2"></i> <?php echo $error_msg; ?></div><?php endif; ?>
+        <?php if (!empty($success_msg)): ?><div class="alert alert-success border-0 shadow-sm rounded-3"><i class="bi bi-check-circle-fill me-2"></i> <?php echo $success_msg; ?></div><?php endif; ?>
+        <?php if (!empty($error_msg)): ?><div class="alert alert-danger border-0 shadow-sm rounded-3"><i class="bi bi-exclamation-triangle-fill me-2"></i> <?php echo $error_msg; ?></div><?php endif; ?>
 
         <div class="card border-0 shadow-sm rounded-4 overflow-hidden">
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light text-muted">
+                    <thead class="table-light text-muted" style="font-size: 0.85rem; text-transform: uppercase;">
                         <tr>
                             <th class="ps-4">Date & Time</th>
                             <th>Patient Name</th>
@@ -249,18 +266,28 @@ try {
                                         <div class="fw-bold"><?php echo date('F j, Y', strtotime($apt['appointment_date'])); ?></div>
                                         <small class="text-muted"><?php echo date('h:i A', strtotime($apt['appointment_date'])); ?></small>
                                     </td>
-                                    <td><?php echo htmlspecialchars($apt['pat_last'] . ', ' . $apt['pat_first']); ?></td>
+                                    <td>
+                                        <?php echo htmlspecialchars($apt['pat_last'] . ', ' . $apt['pat_first']); ?><br>
+                                        <small class="text-muted">ID: #<?php echo str_pad($apt['patient_id'], 4, '0', STR_PAD_LEFT); ?></small>
+                                    </td>
                                     <td><?php echo $apt['notes'] ? htmlspecialchars($apt['notes']) : '<span class="text-muted small">-</span>'; ?></td>
                                     <td>
-                                        <form method="POST" action="" class="d-flex align-items-center gap-2">
-                                            <input type="hidden" name="appointment_id" value="<?php echo $apt['appointment_id']; ?>">
-                                            <select name="status" class="form-select form-select-sm" style="width: auto;">
-                                                <option value="scheduled" <?php echo $apt['status'] == 'scheduled' ? 'selected' : ''; ?>>Scheduled</option>
-                                                <option value="completed" <?php echo $apt['status'] == 'completed' ? 'selected' : ''; ?>>Completed</option>
-                                                <option value="cancelled" <?php echo $apt['status'] == 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                                            </select>
-                                            <button type="submit" name="update_status" class="btn btn-sm btn-outline-secondary">Save</button>
-                                        </form>
+                                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                                            <form method="POST" action="" class="d-flex align-items-center gap-2 m-0">
+                                                <input type="hidden" name="appointment_id" value="<?php echo $apt['appointment_id']; ?>">
+                                                <select name="status" class="form-select form-select-sm" style="width: auto;">
+                                                    <option value="scheduled" <?php echo $apt['status'] == 'scheduled' ? 'selected' : ''; ?>>Scheduled</option>
+                                                    <option value="completed" <?php echo $apt['status'] == 'completed' ? 'selected' : ''; ?>>Completed</option>
+                                                    <option value="cancelled" <?php echo $apt['status'] == 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
+                                                </select>
+                                                <button type="submit" name="update_status" class="btn btn-sm btn-outline-secondary">Save</button>
+                                            </form>
+
+                                            <!-- Video Call Integration -->
+                                            <?php if ($apt['status'] == 'scheduled'): ?>
+                                                <button type="button" class="btn btn-sm btn-success text-nowrap" data-bs-toggle="modal" data-bs-target="#videoCallModal" onclick="startVideoCall(<?php echo $apt['patient_id']; ?>)" title="Start Telehealth Session"><i class="bi bi-camera-video-fill me-1"></i> Call</button>
+                                            <?php endif; ?>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -311,10 +338,79 @@ try {
         </div>
     </div>
 
+    <!-- Video Consultation Modal -->
+    <div class="modal fade" id="videoCallModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content border-0 rounded-4 shadow-lg overflow-hidden">
+                <div class="modal-header bg-dark text-white border-bottom-0 pb-3">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-camera-video-fill text-success me-2"></i> Telehealth Consultation with Patient</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" onclick="endVideoCall()"></button>
+                </div>
+                <div class="modal-body p-0 bg-black" style="height: 70vh;">
+                    <div id="jitsi-container" class="w-100 h-100 d-flex align-items-center justify-content-center text-white">
+                        <div class="text-center">
+                            <div class="spinner-border text-success mb-3" role="status"></div>
+                            <p>Connecting to secure video room...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-dark border-top-0 pt-2 pb-3">
+                    <button type="button" class="btn btn-danger rounded-pill px-4 fw-bold" data-bs-dismiss="modal" onclick="endVideoCall()"><i class="bi bi-telephone-x-fill me-2"></i> End Call</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.getElementById('openSidebar')?.addEventListener('click', () => document.getElementById('sidebar').classList.add('show'));
         document.getElementById('closeSidebar')?.addEventListener('click', () => document.getElementById('sidebar').classList.remove('show'));
+
+        // --- Video Consultation Logic (Jitsi Meet API) ---
+        let api = null;
+        const doctorName = "Dr. <?php echo addslashes(htmlspecialchars($_SESSION['last_name'])); ?>";
+        const doctorId = "<?php echo $doctor_id; ?>";
+
+        function startVideoCall(patientId) {
+            const container = document.getElementById('jitsi-container');
+            container.innerHTML = ''; // Clear the loading spinner
+
+            const domain = 'meet.ffmuc.net';
+            // Generate the EXACT SAME secure room name as the patient's side
+            const roomName = "LuminaCare_Consult_P" + patientId + "_D" + doctorId;
+
+            const options = {
+                roomName: roomName,
+                width: '100%',
+                height: '100%',
+                parentNode: container,
+                userInfo: {
+                    displayName: doctorName
+                },
+                configOverwrite: {
+                    startWithAudioMuted: false,
+                    startWithVideoMuted: false,
+                    prejoinPageEnabled: false
+                },
+                interfaceConfigOverwrite: {
+                    TOOLBAR_BUTTONS: [
+                        'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
+                        'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'raisehand',
+                        'videoquality', 'filmstrip', 'tileview'
+                    ],
+                }
+            };
+
+            api = new JitsiMeetExternalAPI(domain, options);
+        }
+
+        function endVideoCall() {
+            if (api) {
+                api.dispose(); // Destroys the iframe and turns off the camera
+                api = null;
+            }
+            document.getElementById('jitsi-container').innerHTML = '<div class="text-center"><div class="spinner-border text-success mb-3" role="status"></div><p>Connecting to secure video room...</p></div>';
+        }
     </script>
 </body>
 

@@ -131,6 +131,7 @@ try {
             color: white;
             text-decoration: none;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            flex-shrink: 0;
         }
 
         .sidebar-brand span {
@@ -138,28 +139,41 @@ try {
         }
 
         .nav-menu {
-            padding: 20px 0;
+            padding: 10px 0;
             flex-grow: 1;
+            overflow-y: auto;
+            /* Allow scrolling for many items */
+        }
+
+        /* Custom scrollbar for sidebar */
+        .nav-menu::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .nav-menu::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
         }
 
         .nav-item {
-            margin-bottom: 5px;
+            margin-bottom: 2px;
         }
 
         .nav-link {
             color: #d1d5db;
-            padding: 12px 25px;
+            padding: 10px 25px;
             display: flex;
             align-items: center;
             font-weight: 500;
             transition: all 0.3s;
             border-left: 4px solid transparent;
             text-decoration: none;
+            font-size: 0.95rem;
         }
 
         .nav-link i {
             margin-right: 15px;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             color: #9ca3af;
         }
 
@@ -170,9 +184,19 @@ try {
             border-left: 4px solid var(--accent-color);
         }
 
+        .nav-section-title {
+            color: #6b7280;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 15px 25px 5px;
+        }
+
         .logout-wrapper {
             padding: 20px;
             border-top: 1px solid rgba(255, 255, 255, 0.1);
+            flex-shrink: 0;
         }
 
         /* Main Content Styling */
@@ -279,9 +303,23 @@ try {
         </div>
 
         <div class="nav-menu">
-            <div class="nav-item"><a href="dashboard.php" class="nav-link active"><i class="bi bi-speedometer2"></i> System Overview</a></div>
+            <div class="nav-item"><a href="dashboard.php" class="nav-link active"><i class="bi bi-speedometer2"></i> Overview</a></div>
+
+            <div class="nav-section-title">Users & Staff</div>
             <div class="nav-item"><a href="patients.php" class="nav-link"><i class="bi bi-people"></i> Manage Patients</a></div>
             <div class="nav-item"><a href="providers.php" class="nav-link"><i class="bi bi-hospital"></i> Manage Providers</a></div>
+            <div class="nav-item"><a href="nurses.php" class="nav-link"><i class="bi bi-clipboard2-heart"></i> Manage Nurses</a></div>
+            <div class="nav-item"><a href="lab_techs.php" class="nav-link"><i class="bi bi-droplet-half"></i> Manage Lab Techs</a></div>
+            <div class="nav-item"><a href="pharmacists.php" class="nav-link"><i class="bi bi-capsule-pill"></i> Manage Pharmacists</a></div>
+            <div class="nav-item"><a href="cashiers.php" class="nav-link"><i class="bi bi-cash-coin"></i> Manage Cashiers</a></div>
+
+            <div class="nav-section-title">Clinical & Operations</div>
+            <div class="nav-item"><a href="records.php" class="nav-link"><i class="bi bi-folder2-open"></i> Medical Records</a></div>
+            <div class="nav-item"><a href="tests_results.php" class="nav-link"><i class="bi bi-file-medical"></i> Tests & Results</a></div>
+            <div class="nav-item"><a href="inventory.php" class="nav-link"><i class="bi bi-box-seam"></i> Inventory Management</a></div>
+            <div class="nav-item"><a href="billing.php" class="nav-link"><i class="bi bi-receipt"></i> Billing & Finances</a></div>
+
+            <div class="nav-section-title">System</div>
             <div class="nav-item"><a href="logs.php" class="nav-link"><i class="bi bi-database-check"></i> System Logs</a></div>
         </div>
 

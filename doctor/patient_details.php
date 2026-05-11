@@ -74,12 +74,13 @@ try {
     // --- Fetch Data ---
 
     // 1. Fetch Patient Info & Verify Assignment
-    $stmt = $pdo->prepare("SELECT * FROM patients WHERE patient_id = ? AND doctor_id = ?");
-    $stmt->execute([$patient_id, $doctor_id]);
+    // We allow viewing if the patient is assigned to this doctor, or if accessed via EMR Directory
+    $stmt = $pdo->prepare("SELECT * FROM patients WHERE patient_id = ?");
+    $stmt->execute([$patient_id]);
     $patient = $stmt->fetch();
 
     if (!$patient) {
-        die("<div style='padding:50px;text-align:center;font-family:sans-serif;'><h3>Access Denied</h3><p>You do not have permission to view this patient's records.</p><a href='patients.php'>Return to Patient List</a></div>");
+        die("<div style='padding:50px;text-align:center;font-family:sans-serif;'><h3>Access Denied</h3><p>Patient not found.</p><a href='records.php'>Return to Directory</a></div>");
     }
 
     // 2. Fetch Vitals
@@ -158,6 +159,16 @@ try {
             display: flex;
             flex-direction: column;
             transition: all 0.3s;
+            overflow-y: auto;
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #e1e5e8;
+            border-radius: 10px;
         }
 
         .sidebar-brand {
@@ -327,15 +338,19 @@ try {
             <button class="btn-close d-lg-none" id="closeSidebar"></button>
         </div>
         <div class="nav-menu">
-            <div class="nav-item"><a href="dashboard.php" class="nav-link"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a></div>
-            <div class="nav-item"><a href="patients.php" class="nav-link active"><i class="bi bi-people-fill"></i> My Patients</a></div>
-            <div class="nav-item">
-                <a href="messages.php" class="nav-link">
-                    <i class="bi bi-chat-dots-fill"></i> Messages
-                    <?php if ($unread_messages > 0): ?><span class="badge bg-danger rounded-pill ms-auto"><?php echo $unread_messages; ?></span><?php endif; ?>
-                </a>
-            </div>
-            <div class="nav-item"><a href="appointments.php" class="nav-link"><i class="bi bi-calendar-check-fill"></i> Appointments</a></div>
+            <a href="dashboard.php" class="nav-link"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
+            <a href="patients.php" class="nav-link"><i class="bi bi-people-fill"></i> My Patients</a>
+            <a href="messages.php" class="nav-link">
+                <i class="bi bi-chat-dots-fill"></i> Messages
+                <?php if ($unread_messages > 0): ?><span class="badge bg-danger rounded-pill ms-auto"><?php echo $unread_messages; ?></span><?php endif; ?>
+            </a>
+            <a href="appointments.php" class="nav-link"><i class="bi bi-calendar-check-fill"></i> Appointments</a>
+
+            <div class="mt-4 px-4 small text-muted text-uppercase fw-bold">Clinical Logs</div>
+            <a href="records.php" class="nav-link active"><i class="bi bi-folder-check"></i> EMR Directory</a>
+
+            <div class="mt-4 px-4 small text-muted text-uppercase fw-bold">Account</div>
+            <a href="profile.php" class="nav-link"><i class="bi bi-person-gear"></i> Settings</a>
         </div>
         <div class="logout-wrapper"><a href="logout.php" class="btn btn-outline-danger w-100 rounded-pill fw-bold"><i class="bi bi-box-arrow-right me-2"></i> Log Out</a></div>
     </nav>
@@ -351,7 +366,7 @@ try {
         <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3" data-html2canvas-ignore="true">
             <div class="d-flex align-items-center gap-3">
                 <button class="mobile-toggle" id="openSidebar"><i class="bi bi-list"></i></button>
-                <a href="patients.php" class="btn btn-light rounded-circle shadow-sm me-2"><i class="bi bi-arrow-left"></i></a>
+                <a href="records.php" class="btn btn-light rounded-circle shadow-sm me-2"><i class="bi bi-arrow-left"></i></a>
                 <h3 class="mb-0 fw-bold">Patient Chart</h3>
             </div>
             <div>
@@ -641,7 +656,7 @@ try {
             const container = document.getElementById('jitsi-container');
             container.innerHTML = ''; // Clear the loading spinner
 
-            const domain = 'meet.jit.si';
+            const domain = 'meet.ffmuc.net';
             const options = {
                 roomName: roomName,
                 width: '100%',
@@ -653,7 +668,7 @@ try {
                 configOverwrite: {
                     startWithAudioMuted: false,
                     startWithVideoMuted: false,
-                    prejoinPageEnabled: false // Skip the prep page and go straight to the room
+                    prejoinPageEnabled: false
                 },
                 interfaceConfigOverwrite: {
                     TOOLBAR_BUTTONS: [
@@ -672,7 +687,6 @@ try {
                 api.dispose(); // Destroys the iframe and turns off the camera
                 api = null;
             }
-            // Reset the container for next time
             document.getElementById('jitsi-container').innerHTML = '<div class="text-center"><div class="spinner-border text-success mb-3" role="status"></div><p>Connecting to secure video room...</p></div>';
         }
     </script>

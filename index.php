@@ -45,11 +45,11 @@ session_start();
         /* Prevent all horizontal scrolling globally */
         html,
         body {
-            overflow-x: hidden;
             width: 100%;
             max-width: 100vw;
             margin: 0;
             padding: 0;
+            /* Removed overflow-x: hidden as it breaks position: sticky */
         }
 
         body {
@@ -81,8 +81,10 @@ session_start();
             z-index: 1050;
         }
 
-        /* Navbar - Sticky instead of fixed to prevent overlap issues */
+        /* Navbar - Sticky to the top */
         .navbar {
+            position: sticky;
+            top: 0;
             background-color: rgba(255, 255, 255, 0.98);
             backdrop-filter: blur(15px);
             box-shadow: 0 2px 20px rgba(0, 0, 0, 0.04);
@@ -171,6 +173,8 @@ session_start();
             display: flex;
             align-items: center;
             position: relative;
+            overflow-x: hidden;
+            /* Keeps blobs contained without breaking global sticky navbar */
         }
 
         /* Background decorative blobs */
@@ -687,6 +691,17 @@ session_start();
                             </li>
                             <li><a class="dropdown-item py-2 rounded" href="doctor/login.php"><i
                                         class="bi bi-stethoscope text-primary me-2"></i> Doctor Login</a></li>
+                            <li><a class="dropdown-item py-2 rounded" href="nurse/login.php"><i
+                                        class="bi bi-clipboard2-heart text-info me-2"></i> Nurse Login</a></li>
+                            <li><a class="dropdown-item py-2 rounded" href="lab/login.php"><i
+                                        class="bi bi-droplet-half text-warning me-2"></i> Lab Tech Login</a></li>
+                            <li><a class="dropdown-item py-2 rounded" href="pharmacy/login.php"><i
+                                        class="bi bi-capsule-pill text-success me-2"></i> Pharmacist Login</a></li>
+                            <li><a class="dropdown-item py-2 rounded" href="cashier/login.php"><i
+                                        class="bi bi-cash-coin text-secondary me-2"></i> Cashier Login</a></li>
+                            <li>
+                                <hr class="dropdown-divider">
+                            </li>
                             <li><a class="dropdown-item py-2 rounded" href="admin/login.php"><i
                                         class="bi bi-shield-lock text-dark me-2"></i> Administrator</a></li>
                         </ul>
@@ -938,20 +953,13 @@ session_start();
                     </div>
                 </div>
                 <div class="col-lg-2 col-md-4 col-sm-6">
-                    <h5>For Patients</h5>
+                    <h5>For Staff</h5>
                     <ul class="list-unstyled">
-                        <li><a href="patient/login.php">Patient Login</a></li>
-                        <li><a href="patient/register.php">Create Account</a></li>
-                        <li><a href="#">How it Works</a></li>
-                        <li><a href="#">FAQ</a></li>
-                    </ul>
-                </div>
-                <div class="col-lg-2 col-md-4 col-sm-6">
-                    <h5>For Providers</h5>
-                    <ul class="list-unstyled">
-                        <li><a href="doctor/login.php">Doctor Login</a></li>
-                        <li><a href="#">Join Network</a></li>
-                        <li><a href="#">Clinical Guidelines</a></li>
+                        <li><a href="doctor/login.php">Doctor Portal</a></li>
+                        <li><a href="nurse/login.php">Nurse Portal</a></li>
+                        <li><a href="lab/login.php">Laboratory Portal</a></li>
+                        <li><a href="pharmacy/login.php">Pharmacy Portal</a></li>
+                        <li><a href="cashier/login.php">Cashier Portal</a></li>
                         <li><a href="admin/login.php">System Admin</a></li>
                     </ul>
                 </div>
